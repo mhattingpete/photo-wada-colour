@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wada Colour Lookup</title>
+<style>
+  body { font: 16px/1.4 system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 16px; background: #f6f3ee; color: #222; }
+  h1 { font-size: 1.4rem; }
+  button, input[type=file] { min-height: 44px; font: inherit; }
+  canvas { display: block; width: 100%; height: auto; margin: 12px 0; touch-action: none; }
+  #msg { color: #a00; min-height: 1.4em; }
+  .row { display: grid; grid-template-columns: 160px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid #ddd; }
+  .matches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .swatch { height: 64px; border-radius: 6px; border: 1px solid #0002; margin-bottom: 4px; }
+  .card small { display: block; color: #555; }
+  @media (max-width: 600px) { .row, .matches { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Wada colour lookup</h1>
+<input type="file" id="file" accept="image/*" disabled>
+<button id="clear" hidden>Clear crop</button>
+<p id="msg"></p>
+<canvas id="view" hidden></canvas>
+<div id="results"></div>
+<script type="module">
+import { dominantColours, nearestWada, withLab, cropRect } from './colour.js';
+
+const $ = id => document.getElementById(id);
+const view = $('view'), ctx = view.getContext('2d');
+let wada, img;
+
+try {
+  const res = await fetch('wada.json');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  wada = withLab((await res.json()).colors);
+  $('file').disabled = false;
+} catch (e) {
+  $('msg').textContent = `Couldn't load wada.json (${e.message})`;
+}
+
+$('file').onchange = () => {
+  const file = $('file').files[0];
+  if (!file) return;
+  const next = new Image();
+  next.onload = () => {
+    if (img) URL.revokeObjectURL(img.src);
+    img = next;
+    $('clear').hidden = true;
+    show(null);
+    analyse(null);
+  };
+  next.onerror = () => { $('msg').textContent = "Couldn't read that image"; };
+  next.src = URL.createObjectURL(file);
+};
+
+// rect: {x, y, w, h} in source-image px, or null for the whole image.
+function show(rect) {
+  view.hidden = false;
+  view.width = Math.min(img.naturalWidth, 1200);
+  view.height = Math.round((img.naturalHeight * view.width) / img.naturalWidth);
+  ctx.drawImage(img, 0, 0, view.width, view.height);
+  if (!rect) return;
+  const k = view.width / img.naturalWidth;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#ff0';
+  ctx.strokeRect(rect.x * k, rect.y * k, rect.w * k, rect.h * k);
+}
+
+function analyse(rect) {
+  const { x, y, w, h } = rect ?? { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  const s = Math.min(1, 200 / Math.max(w, h));
+  const off = document.createElement('canvas');
+  off.width = Math.max(1, Math.round(w * s));
+  off.height = Math.max(1, Math.round(h * s));
+  const octx = off.getContext('2d');
+  octx.drawImage(img, x, y, w, h, 0, 0, off.width, off.height);
+  const colours = dominantColours(octx.getImageData(0, 0, off.width, off.height).data);
+  $('msg').textContent = colours.length ? '' : 'No opaque pixels in selection';
+  $('results').innerHTML = colours.map(row).join('');
+}
+
+const card = m => `<div class="card">
+  <div class="swatch" style="background:${m.hex}"></div>
+  <b>${m.name}</b> ${m.hex}
+  <small>ΔE ${m.deltaE.toFixed(1)} · ${m.verdict}</small>
+  <small>tier: ${m.tier}</small>
+  <small><code>${m.slug}</code> <button data-slug="${m.slug}">Copy</button></small>
+</div>`;
+
+const row = c => `<div class="row">
+  <div><div class="swatch" style="background:${c.hex}"></div>${c.hex} · ${Math.round(c.share * 100)}%</div>
+  <div class="matches">${nearestWada(c.lab, wada).map(card).join('')}</div>
+</div>`;
+
+$('results').onclick = async e => {
+  const b = e.target.closest('button[data-slug]');
+  if (!b) return;
+  try {
+    await navigator.clipboard.writeText(b.dataset.slug);
+    b.textContent = 'Copied';
+  } catch {
+    b.textContent = 'Copy failed';
+  }
+  setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+};
+</script>
+</body>
+</html>
