@@ -105,6 +105,40 @@ $('results').onclick = async e => {
   }
   setTimeout(() => { b.textContent = 'Copy'; }, 1500);
 };
+
+// Crop: drag on the canvas. Pointer events cover mouse and touch; touch-action: none stops scrolling.
+let start;
+const toBox = e => {
+  const r = view.getBoundingClientRect();
+  return [e.clientX - r.left, e.clientY - r.top];
+};
+const toSource = box => {
+  if (!box) return null;
+  const k = img.naturalWidth / view.clientWidth;
+  return { x: box.x * k, y: box.y * k, w: box.w * k, h: box.h * k };
+};
+const dragRect = e => toSource(cropRect(...start, ...toBox(e), view.clientWidth, view.clientHeight));
+
+view.onpointerdown = e => {
+  if (!img) return;
+  start = toBox(e);
+  view.setPointerCapture(e.pointerId);
+};
+view.onpointermove = e => { if (start) show(dragRect(e)); };
+view.onpointerup = e => {
+  if (!start) return;
+  const rect = dragRect(e);
+  start = null;
+  show(rect);
+  analyse(rect);
+  $('clear').hidden = !rect;
+};
+view.onpointercancel = () => { start = null; };
+$('clear').onclick = () => {
+  show(null);
+  analyse(null);
+  $('clear').hidden = true;
+};
 </script>
 </body>
 </html>
