@@ -72,3 +72,59 @@ export function describeDeltaE(de) {
 
 // wada.json colors[] with Lab computed from hex (not the book-CMYK `lab` field).
 export const withLab = colors => colors.map(c => ({ ...c, lab: srgbToLab(hexToRgb(c.hex)) }));
+
+const dist2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
+const mean = vs => [0, 1, 2].map(i => vs.reduce((s, v) => s + v[i], 0) / vs.length);
+
+// k-means in Lab over the opaque pixels of an RGBA buffer (as from getImageData).
+// Seeds are quantiles of the pixels sorted by L*, so the same image always gives the same result.
+export function dominantColours(rgba, k = 3) {
+  const px = [];
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < 128) continue;
+    const rgb = [rgba[i], rgba[i + 1], rgba[i + 2]];
+    px.push({ rgb, lab: srgbToLab(rgb) });
+  }
+  if (!px.length) return [];
+  px.sort((p, q) => p.lab[0] - q.lab[0]);
+  let centres = Array.from({ length: k }, (_, i) => px[Math.floor(((2 * i + 1) / (2 * k)) * px.length)].lab);
+  const assign = new Int32Array(px.length).fill(-1);
+  for (let iter = 0; iter < 20; iter++) {
+    let changed = false;
+    px.forEach((p, n) => {
+      let best = 0;
+      for (let j = 1; j < k; j++) if (dist2(p.lab, centres[j]) < dist2(p.lab, centres[best])) best = j;
+      if (assign[n] !== best) [assign[n], changed] = [best, true];
+    });
+    if (!changed) break;
+    centres = centres.map((c, j) => {
+      const members = px.filter((_, n) => assign[n] === j);
+      return members.length ? mean(members.map(p => p.lab)) : c;
+    });
+  }
+  return centres
+    .map((_, j) => px.filter((_, n) => assign[n] === j))
+    .filter(members => members.length)
+    .map(members => {
+      const hex = rgbToHex(mean(members.map(p => p.rgb)));
+      return { hex, lab: srgbToLab(hexToRgb(hex)), share: members.length / px.length };
+    })
+    .sort((a, b) => b.share - a.share);
+}
+
+export function nearestWada(lab, colours, n = 3) {
+  return colours
+    .map(c => ({ slug: c.slug, name: c.name, hex: c.hex, tier: c.workwear.tier, deltaE: ciede2000(lab, c.lab) }))
+    .sort((a, b) => a.deltaE - b.deltaE)
+    .slice(0, n)
+    .map(m => ({ ...m, verdict: describeDeltaE(m.deltaE) }));
+}
+
+// Drag start/end in display px → rectangle clamped to the w×h box; null for a tap-sized drag.
+export function cropRect(x0, y0, x1, y1, w, h) {
+  const clamp = (v, max) => Math.min(Math.max(v, 0), max);
+  const [left, right] = [clamp(x0, w), clamp(x1, w)].sort((a, b) => a - b);
+  const [top, bottom] = [clamp(y0, h), clamp(y1, h)].sort((a, b) => a - b);
+  if (right - left < 5 || bottom - top < 5) return null;
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
