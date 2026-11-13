@@ -67,6 +67,16 @@ assert.deepEqual(dominantColours(buffer([['#123456', 10, 0]])), []);
 // Review focus 1: uniform buffer → one colour, share 1
 assert.deepEqual(dominantColours(buffer([['#1f3149', 500]])).map(d => [d.hex, d.share]), [['#1f3149', 1]]);
 
+// Final review: shaded plain cloth (±8 % brightness) is one colour, not three near-duplicates
+const shaded = (hex, count) => Uint8ClampedArray.from({ length: count * 4 }, (_, i) => {
+  if (i % 4 === 3) return 255;
+  const f = 0.92 + (0.16 * (Math.floor(i / 4) % 100)) / 99;
+  return hexToRgb(hex)[i % 4] * f;
+});
+assert.equal(dominantColours(shaded('#1f3149', 10000)).length, 1, 'shaded navy → one row');
+const navyOnWhite = Uint8ClampedArray.from([...shaded('#1f3149', 6000), ...buffer([['#ffffff', 4000]])]);
+assert.deepEqual(dominantColours(navyOnWhite).map(d => Math.round(d.share * 10) / 10), [0.6, 0.4], 'navy on white → two rows');
+
 // Review focus 2: fewer pixels than k
 const few = dominantColours(buffer([['#000000', 1], ['#ffffff', 1]]), 3);
 assert.equal(few.length, 2);

@@ -102,15 +102,28 @@ export function dominantColours(rgba, k = 3) {
       return members.length ? mean(members.map(p => p.lab)) : c;
     });
   }
-  return centres
-    .map((_, j) => px.filter((_, n) => assign[n] === j))
-    .filter(members => members.length)
-    .map(members => {
-      const hex = rgbToHex(mean(members.map(p => p.rgb)));
-      return { hex, lab: srgbToLab(hexToRgb(hex)), share: members.length / px.length };
-    })
+  const summary = members => {
+    const hex = rgbToHex(mean(members.map(p => p.rgb)));
+    return { members, hex, lab: srgbToLab(hexToRgb(hex)) };
+  };
+  let groups = centres.map((_, j) => px.filter((_, n) => assign[n] === j)).filter(m => m.length).map(summary);
+  // Shading on plain cloth splits one colour across clusters; merge any pair closer than MERGE_DELTA_E.
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let a = 0; a < groups.length && !merged; a++)
+      for (let b = a + 1; b < groups.length && !merged; b++)
+        if (ciede2000(groups[a].lab, groups[b].lab) < MERGE_DELTA_E) {
+          groups = [...groups.filter((_, i) => i !== a && i !== b), summary([...groups[a].members, ...groups[b].members])];
+          merged = true;
+        }
+  }
+  return groups
+    .map(g => ({ hex: g.hex, lab: g.lab, share: g.members.length / px.length }))
     .sort((a, b) => b.share - a.share);
 }
+
+// describeDeltaE's "close cousin" boundary: closer clusters read as one colour.
+const MERGE_DELTA_E = 5;
 
 export function nearestWada(lab, colours, n = 3) {
   return colours
